@@ -1,118 +1,111 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 # global limit 580 calls in 3600
 
 import os
+import pandas as pd
 from time import sleep
-from private import *
-import xmlrpc.client
 from datetime import datetime, timedelta
-
+from collections import Counter
 import logging
+
+from lib import *
+#from private import *
+#from config import *
+
 logging.basicConfig(
   format='%(asctime)s\t%(levelname)s\t%(message)s',
   #filename='default.log',
-  #level=logging.INFO
-  level=logging.DEBUG
+  level=logging.INFO
+  #level=logging.DEBUG
   )
 
-logging.info('*'*20 + ' NUOVA ESECUZIONE ' + '*'*20)
-
-now = datetime.now()
-
-if os.path.exists('disponibilita.json'):
-  disponibilita = json.load(open('disponibilita.json'))
-  disponibilita = disponibilita['next']
-else:
-  sleep(2)
-  disponibilita = datetime.now()
 
 
-if disponibilita < now:
-  delay = disponibilita - now
-  logging.error('Eccessiva frequenza, aspetta {}'.format(delay.seconds))
+def main():
+
+  from config import min_delay, disponibilita_path
+  from private import pkey, email, user, password, url
+
+  # Today and now!
+  now = datetime.now()
 
 
-calls = 1
-server = xmlrpc.client.Server(url)
-returnCode, token = server.acquire_token(user, password, pkey)
-
-props = server.fetch_properties(token)
-lcode = props[0]['lcode']
+  # Verifico che il delay sia stato rispettato
+  status = checkDelay(now, disponibilita_path, delay=min_delay)
 
 
-past = now + timedelta(days=7-now.isoweekday()-14)
-future = now + timedelta(days=7-now.isoweekday()+14)
-
-resvs = server.fetch_reservations(token, lcode, past.strftime('%d/%m/%Y'), future.strftime('%d/%m/%Y'))
-calls += 1
-sleep(5)
-
-for i in resvs:
-  i['dfrom'] = datetime.fromtimestamp(i['dfrom'])
-  i['dto'] = datetime.fromtimestamp(i['dto'])
+  # In caso contrario esco immediatamente
+  if status == 1:
+    logging.error('ESCO IMMEDIATAMENTE!!')
+    os._exit(1)
 
 
-data = {}
-delta = future - past
-for d in range(delta.days + 1):
-
-  cur = past + timedelta(days=d)
-  data[cur.strftime('%d/%m/%Y')] = {'resvs': 0}
-
-  logging.debug(cur)
-
-  for i in resvs:
-    if i['dfrom'] >= cur <= i['dto']:
-      data[cur.strftime('%d/%m/%Y')]['resvs'] += 1
-      logging.debug(i['rcode'])
-      print(cur, i['rcode'])
+  # Configuro la connessione
+  server, lcode, token = initConnection(url, user, password, pkey)
 
 
-
-for i in range(delta.days + 1):
-
-  cur = yesterday + timedelta(days=i)
-  scur = cur.strftime('%d/%m/%Y')
-  data[scur] = {}
-
-  logging.debug('Arrivato a {}'.format(scur))
-
-  resvs = server.fetch_reservations_day(token, lcode, scur)
-  calls += 1
-
-  if len(resvs) == 2 and resvs[0] in [-1, -21]:
-    logging.warning('token scaduto {}'.format(calls))
-    break
-
-  data[scur]['resvs'] = resvs
-
-  if cur <= now:
-
-    logging.debug('Cheking revenues {}'.format(scur))
-
-    rev = 0
-    for res in resvs:
-      invoices = server.fetch_invoices(token, lcode, res['rcode'])
-
-      if len(invoices) == 2 and invoices[0] in [-1, -21]:
-        logging.warning('token scaduto {}'.format(calls))
-        break
-
-      for invoice in invoices:
-        logging.debug(invoice)
-        rev += invoice['concepts']['tt_invoice']
-
-      sleep(2)
-
-    data[scur]['invoices'] = rev
-
-  sleep(3)
+  # Definisco il perimetro termporale: da 2 we nel passato a 2 we nel futuro, a prescindere dal wod corrente
+  #past = now + timedelta(days= 7 - now.isoweekday() - 14)
+  past = now
+  future = now + timedelta(days= 7 - now.isoweekday() + 14)
 
 
+  # Scarico le prenotazioni
+  reservations = server.fetch_reservations(token, lcode, past.strftime('%d/%m/%Y'), future.strftime('%d/%m/%Y'))
 
-# Chiudere
-server.release_token(token)
+  # Chiudo la connessione
+  server.release_token(token)
 
-logging.info('*'*20 + ' ESCO NORMALMENTE ' + '*'*20)
+
+  # Eseguo il parsing delle date
+  reservations = parseDates(reservations)
+
+
+  # Itero e calcolo
+  data = {}
+  delta = future - past
+  for d in range(delta.days + 1):
+
+    # Per ciascuno fra i giorni presi in considerazione
+    cur = past + timedelta(days=d)
+    cur_as_string = cur.strftime('%Y/%m/%d')
+
+    logging.debug(cur_as_string)
+
+    correnti = [i for i in reservations if i['dfrom'] <= cur < i['dto']]
+    adults = sum([i.get('adults', 0) for i in correnti])
+    childs = sum([i.get('children', 0) for i in correnti])
+    revenues = sum([i['roomspricing'][0]['price'] for i in correnti])
+    room_type = Counter([i['roomspricing'][0]['type'].split('_')[1] for i in correnti])
+    #rcodes = [i['rcode'] for i in correnti]
+
+    values = {
+      'date': cur_as_string,
+      'reservations': len(correnti),
+      'adults': adults,
+      'childs': childs,
+      'revenues': revenues,
+      #'rcodes': rcodes
+      }
+    values.update(room_type)
+
+    data[cur_as_string] = values
+
+  # Metto in tabella salvo ed esco
+  df = pd.DataFrame(list(data.values()))
+  df.fillna(0, inplace=True)
+
+
+  columns = ["date", "reservations", "Borgo", "Villa", "adults", "childs", "revenues",]
+  return df.to_html(index=False, columns=columns, border=0)
+
+
+if __name__ == "__main__":
+
+  logging.info('*'*20 + ' NUOVA ESECUZIONE ' + '*'*20)
+
+  main()
+
+  logging.info('*'*20 + ' ESCO NORMALMENTE ' + '*'*20)
