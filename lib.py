@@ -5,8 +5,12 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
-#import xmlrpc.client
-import xmlrpclib
+
+import sys
+if sys.version_info.major == 3:
+  import xmlrpc.client as xmlrpclib
+else:
+  import xmlrpclib
 
 def saveNow(disponibilita, disponibilita_path):
   out = open(disponibilita_path, 'w')
