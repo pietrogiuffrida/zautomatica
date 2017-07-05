@@ -2,4 +2,4 @@
 # -*- coding: utf-8 -*-
 
 disponibilita_path = 'disponibilita.json'
-min_delay = 1
+min_delay = 30
