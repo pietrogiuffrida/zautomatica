@@ -14,7 +14,7 @@ def saveNow(disponibilita, disponibilita_path):
   out.close()
 
 
-def checkDelay(now, disponibilita_path, delay=1):
+def checkDelay(now, disponibilita_path, delay=60):
 
   # Legge dal file di configurazione la data dell'ultima esecuzione
   # Se il file di configurazione non esiste assume che si tratti del primo run
@@ -33,12 +33,12 @@ def checkDelay(now, disponibilita_path, delay=1):
 
   logging.debug('Last run {}'.format(last_run))
 
-  next_run = last_run + timedelta(hours=delay)
+  next_run = last_run + timedelta(minutes=delay)
   logging.debug('Next run {}'.format(next_run))
 
   if next_run > now:
     delay = next_run - now
-    logging.error('Eccessiva frequenza, aspetta {} minutes'.format(round(delay.seconds / 60)))
+    logging.error('Eccessiva frequenza di richieste a ZAK, aspetta {} minutes'.format(round(delay.seconds / 60)))
     return 1
 
   disponibilita['last_run'] = now.strftime(pattern_date)
