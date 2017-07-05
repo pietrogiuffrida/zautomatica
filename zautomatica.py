@@ -80,7 +80,7 @@ def loadData(nodelay=False):
     #rcodes = [i['rcode'] for i in correnti]
 
     values = {
-      'date': cur_as_string,
+      'date': cur,
       'reservations': len(correnti),
       'adults': adults,
       'childs': childs,
@@ -95,9 +95,7 @@ def loadData(nodelay=False):
   df = pd.DataFrame(list(data.values()))
   df.fillna(0, inplace=True)
   df.sort_values('date', inplace=True)
-
-  s = df.style.set_properties(**{'text-align': 'left'})
-  s.render()
+  df.date = df.date.apply(lambda x: x.strftime('%d/%m'))
 
   columns = ["date", "reservations", "Borgo", "Villa", "adults", "childs", "revenues",]
   return df.to_html(index=False, columns=columns, border=0)
